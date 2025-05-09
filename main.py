@@ -37,10 +37,10 @@ def main():
             WHEN a.type = 'in_refund' THEN 'Rectificativa Proveedor'
             ELSE 'Otro'
         END as "Tipo",
-        to_char(a.date_invoice, 'DD') as "Fecha Dia",
-        to_char(a.date_invoice, 'MM') as "Fecha Mes",
-        to_char(a.date_invoice, 'YYYY') as "Fecha Año",
-        to_char(a.date_invoice, 'DD/MM/YYYY') as "Fecha",
+        EXTRACT(a.date_invoice, 'DD') as "Fecha Dia",
+        EXTRACT(a.date_invoice, 'MM') as "Fecha Mes",
+        EXTRACT(a.date_invoice, 'YYYY') as "Fecha Año",
+        EXTRACT(a.date_invoice, 'DD/MM/YYYY') as "Fecha",
         CASE
             WHEN afp.name = 'Recargo de Equivalencia' THEN 'Recargo de Equivalencia'
             WHEN afp.name = 'Régimen Extracomunitario' THEN 'Régimen Extracomunitario'
