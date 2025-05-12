@@ -180,7 +180,7 @@ ORDER BY
 
     # 6. Obtener códigos existentes para evitar duplicados (columna 3 = VAT/CIF)
     existing_invoice_codes = {
-        sheet.cell(row=i, column=2).value
+        sheet.cell(row=i, column=1).value
         for i in range(start_row + 1, end_row + 1)
         if sheet.cell(row=i, column=3).value is not None
     }
