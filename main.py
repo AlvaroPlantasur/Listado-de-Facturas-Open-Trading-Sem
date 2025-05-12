@@ -25,7 +25,7 @@ def main():
     
     # 2. Definir fechas dinámicas: últimos 30 días hasta hoy
     fecha_fin = datetime.now().date()
-    fecha_inicio = fecha_fin - timedelta(days=30)
+    fecha_inicio = '2025-01-01'
 
     fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
