@@ -134,7 +134,7 @@ INNER JOIN
  
 WHERE 
     a.state IN ('open','paid') 
-    AND a.date_invoice BETWEEN {fecha_inicio_str} AND {fecha_fin_str}
+    AND a.date_invoice BETWEEN '{fecha_inicio_str}' AND '{fecha_fin_str}'
     AND a.type IN ('out_invoice', 'out_refund') -- Solo facturas y rectificativas de clientes
 	AND a.internal_number NOT LIKE 'RA%' -- Omitir RAPPEL
  
