@@ -1,11 +1,8 @@
 import os
 import psycopg2
-from openpyxl import load_workbook, Workbook
-from openpyxl.styles import Font
-from openpyxl.worksheet.table import Table, TableStyleInfo
-from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
+from openpyxl.utils import column_index_from_string
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
 import sys
 import copy
 
@@ -26,12 +23,11 @@ def main():
         'port': db_port
     }
     
-    # 2. Definir la nueva consulta SQL con fechas dinámicas
+    # 2. Fechas de consulta
     fecha_inicio_str = '2025-01-01'
     fecha_fin = datetime.now().date()
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
-    
-    # 3. Consulta SQL con el rango dinámico
+
     query = f"""
     SELECT 
     rc.name as "Compañía",
@@ -45,12 +41,10 @@ def main():
     WHEN a.type = 'in_refund' THEN 'Rectificativa Proveedor'
     ELSE 'Otro'
     END as "Tipo",
- 
     EXTRACT(DAY FROM a.date_invoice) AS "Fecha Dia",
 	EXTRACT(MONTH FROM a.date_invoice) AS "Fecha Mes",
 	EXTRACT(YEAR FROM a.date_invoice) AS "Fecha Año",
 	TO_CHAR(a.date_invoice, 'DD/MM/YYYY') AS "Fecha",
- 
     CASE 
         WHEN afp.name = 'Recargo de Equivalencia' THEN 'Recargo de Equivalencia'
         WHEN afp.name = 'Régimen Extracomunitario' THEN 'Régimen Extracomunitario'
@@ -58,40 +52,31 @@ def main():
         WHEN afp.name = 'REGIMEN NACIONAL' THEN 'Régimen Nacional'
         ELSE afp.name
     END as "Régimen fiscal",
- 
     a.amount_untaxed_0 as "Base 0", 
     a.amount_taxed_0 as "Importe 0", 
     a.amount_total_0 as "Total 0",
- 
     a.amount_untaxed_4 as "Base 4", 
     a.amount_taxed_4 as "Importe 4", 
     a.amount_total_4 as "Total 4",
- 
     a.amount_untaxed_8 as "Base 8", 
     a.amount_taxed_8 as "Importe 8", 
     a.amount_total_8 as "Total 8",
- 
     a.amount_untaxed_10 as "Base 10", 
     a.amount_taxed_10 as "Importe 10", 
     a.amount_total_10 as "Total 10",
- 
     a.amount_untaxed_18 as "Base 18", 
     a.amount_taxed_18 as "Importe 18", 
     a.amount_total_18 as "Total 18",
- 
     a.amount_untaxed_21 as "Base 21", 
     a.amount_taxed_21 as "Importe 21", 
     a.amount_total_21 as "Total 21",
- 
     a.recargo_equivalencia_05 as "Recargo 0,5", 
     a.recargo_equivalencia_1 as "Recargo 1", 
     a.recargo_equivalencia_14 as "Recargo 1.4", 
     a.recargo_equivalencia_4 as "Recargo 4",
     a.recargo_equivalencia_52 as "Recargo 5.2",
- 
     a.amount_total as "Total",
- 
-  
+
 	(CASE 							    -- Total Bases (suma de todas las bases) con signo negativo en 'Rectificativa Cliente'
         WHEN a.type = 'out_refund' THEN -- Si es rectificativa cliente
             - (
@@ -118,7 +103,6 @@ def main():
     END as "BULK",  -- Columna Obsolescencia (Bulk)
 	'S-' || rp.id AS "ID Cliente",
 	rpa.city AS "Ciudad"
- 
 FROM 
     account_invoice as a 
 INNER JOIN 
@@ -131,18 +115,16 @@ INNER JOIN
     res_partner rp ON rp.id = a.partner_id
 INNER JOIN 
 	res_partner_address rpa ON rpa.id = a.address_invoice_id
- 
 WHERE 
     a.state IN ('open','paid') 
     AND a.date_invoice BETWEEN '{fecha_inicio_str}' AND '{fecha_fin_str}'
     AND a.type IN ('out_invoice', 'out_refund') -- Solo facturas y rectificativas de clientes
 	AND a.internal_number NOT LIKE 'RA%' -- Omitir RAPPEL
- 
 ORDER BY 
     a.internal_number;
-    """
+    """  # Mismo que ya tienes
     
-    # 4. Ejecutar la consulta
+    # 3. Ejecutar la consulta
     try:
         with psycopg2.connect(**db_params) as conn:
             with conn.cursor() as cur:
@@ -159,44 +141,76 @@ ORDER BY
     else:
         print(f"Se obtuvieron {len(resultados)} filas de la consulta.")
     
-    # 5. Cargar el archivo base Portes.xlsx
+    # 4. Cargar archivo y tabla
     try:
         book = load_workbook(file_path)
         sheet = book.active
-        existing_invoice_codes = {row[2] for row in sheet.iter_rows(min_row=2, values_only=True) if row[2] is not None}
+        table = sheet.tables.get("Listado de Facturas Open Trading-Sem 2025")
+        if not table:
+            print("No se encontró la tabla 'Listado de Facturas Open Trading-Sem 2025'.")
+            return
     except FileNotFoundError:
-        print(f"No se encontró el archivo base '{file_path}'. Se aborta para no perder el formato.")
+        print(f"No se encontró el archivo '{file_path}'.")
         return
 
-    # 6. Añadir nuevas filas sin duplicados
+    # 5. Determinar límites de la tabla existente
+    start_cell, end_cell = table.ref.split(':')
+    start_col_letter = ''.join(filter(str.isalpha, start_cell))
+    end_col_letter = ''.join(filter(str.isalpha, end_cell))
+    start_row = int(''.join(filter(str.isdigit, start_cell)))
+    end_row = int(''.join(filter(str.isdigit, end_cell)))
+    start_col = column_index_from_string(start_col_letter)
+    end_col = column_index_from_string(end_col_letter)
+
+    # 6. Detectar columna "Número"
+    numero_col_idx = None
+    for cell in sheet[start_row]:
+        if cell.value == "Número":
+            numero_col_idx = cell.column
+            break
+
+    if numero_col_idx is None:
+        print("No se encontró la columna 'Número'.")
+        return
+
+    # 7. Obtener "Números" existentes
+    existing_numbers = {
+        sheet.cell(row=i, column=numero_col_idx).value
+        for i in range(start_row + 1, end_row + 1)
+        if sheet.cell(row=i, column=numero_col_idx).value is not None
+    }
+
+    # 8. Insertar nuevas filas que no estén duplicadas
+    new_data = []
     for row in resultados:
-        if row[1] not in existing_invoice_codes:
-            sheet.append(row)
-            new_row_index = sheet.max_row
-            if new_row_index > 1:
-                for col in range(1, sheet.max_column + 1):
-                    source_cell = sheet.cell(row=new_row_index - 1, column=col)
-                    target_cell = sheet.cell(row=new_row_index, column=col)
-                    target_cell.font = copy.copy(source_cell.font)
-                    target_cell.fill = copy.copy(source_cell.fill)
-                    target_cell.border = copy.copy(source_cell.border)
-                    target_cell.alignment = copy.copy(source_cell.alignment)
+        if row[1] not in existing_numbers:  # row[1] = "Número"
+            new_data.append(row)
     
-    # 7. Actualizar referencia de la tabla "Portes"
-    if "Portes" in sheet.tables:
-        tabla = sheet.tables["Portes"]
-        max_row = sheet.max_row
-        max_col = sheet.max_column
-        last_col_letter = get_column_letter(max_col)
-        new_ref = f"A1:{last_col_letter}{max_row}"
-        tabla.ref = new_ref
-        print(f"Tabla 'Portes' actualizada a rango: {new_ref}")
-    else:
-        print("No se encontró la tabla 'Portes'. Se conservará el formato actual, pero no se actualizará la referencia de la tabla.")
+    if not new_data:
+        print("No hay datos nuevos que añadir.")
+        return
     
-    # 8. Guardar archivo
+    insert_row = end_row + 1
+    for row in new_data:
+        for col_index in range(len(row)):
+            cell = sheet.cell(row=insert_row, column=start_col + col_index, value=row[col_index])
+            # Copiar estilo de la última fila de la tabla
+            source_cell = sheet.cell(row=end_row, column=start_col + col_index)
+            cell.font = copy.copy(source_cell.font)
+            cell.fill = copy.copy(source_cell.fill)
+            cell.border = copy.copy(source_cell.border)
+            cell.alignment = copy.copy(source_cell.alignment)
+        insert_row += 1
+
+    # 9. Actualizar rango de la tabla
+    new_end_row = end_row + len(new_data)
+    new_ref = f"{start_col_letter}{start_row}:{end_col_letter}{new_end_row}"
+    table.ref = new_ref
+    print(f"Tabla actualizada a rango: {new_ref}")
+
+    # 10. Guardar archivo
     book.save(file_path)
-    print(f"Archivo guardado con la estructura de tabla en '{file_path}'.")
-    
+    print(f"Archivo guardado en '{file_path}'.")
+
 if __name__ == '__main__':
     main()
