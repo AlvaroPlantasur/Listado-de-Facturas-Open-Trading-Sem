@@ -1,34 +1,30 @@
 import os
 import psycopg2
 from openpyxl import load_workbook
-from openpyxl.utils import column_index_from_string
+from openpyxl.utils import get_column_letter, column_index_from_string
 from datetime import datetime
 import sys
 import copy
 
 def main():
-    # 1. Obtener credenciales y ruta del archivo
-    db_name = os.environ.get('DB_NAME')
-    db_user = os.environ.get('DB_USER')
-    db_password = os.environ.get('DB_PASSWORD')
-    db_host = os.environ.get('DB_HOST')
-    db_port = os.environ.get('DB_PORT')
-    file_path = os.environ.get('EXCEL_FILE_PATH')
-    
+    # 1. Parámetros de conexión y archivo
     db_params = {
-        'dbname': db_name,
-        'user': db_user,
-        'password': db_password,
-        'host': db_host,
-        'port': db_port
+        'dbname': os.environ.get('DB_NAME'),
+        'user': os.environ.get('DB_USER'),
+        'password': os.environ.get('DB_PASSWORD'),
+        'host': os.environ.get('DB_HOST'),
+        'port': os.environ.get('DB_PORT')
     }
-    
-    # 2. Fechas de consulta
+
+    file_path = os.environ.get('EXCEL_FILE_PATH')
+
+    # 2. Fechas para la consulta
     fecha_inicio_str = '2025-01-01'
     fecha_fin = datetime.now().date()
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
 
-    query = f"""
+    # 3. Consulta SQL
+    query = f""" 
     SELECT 
     rc.name as "Compañía",
     a.internal_number as "Número",
@@ -122,9 +118,9 @@ WHERE
 	AND a.internal_number NOT LIKE 'RA%' -- Omitir RAPPEL
 ORDER BY 
     a.internal_number;
-    """  # Mismo que ya tienes
-    
-    # 3. Ejecutar la consulta
+    """
+
+    # 4. Ejecutar la consulta
     try:
         with psycopg2.connect(**db_params) as conn:
             with conn.cursor() as cur:
@@ -134,26 +130,24 @@ ORDER BY
     except Exception as e:
         print(f"Error al conectar o ejecutar la consulta: {e}")
         sys.exit(1)
-    
+
     if not resultados:
         print("No se obtuvieron resultados de la consulta.")
         return
-    else:
-        print(f"Se obtuvieron {len(resultados)} filas de la consulta.")
-    
-    # 4. Cargar archivo y tabla
+
+    # 5. Cargar Excel
     try:
         book = load_workbook(file_path)
         sheet = book.active
-        table = sheet.tables.get("Listado de Facturas Open Trading-Sem 2025")
+        table = sheet.tables.get("Tabla1")
         if not table:
-            print("No se encontró la tabla 'Listado de Facturas Open Trading-Sem 2025'.")
+            print("No se encontró la tabla 'Tabla1'.")
             return
     except FileNotFoundError:
         print(f"No se encontró el archivo '{file_path}'.")
         return
 
-    # 5. Determinar límites de la tabla existente
+    # 6. Obtener rango de la tabla
     start_cell, end_cell = table.ref.split(':')
     start_col_letter = ''.join(filter(str.isalpha, start_cell))
     end_col_letter = ''.join(filter(str.isalpha, end_cell))
@@ -162,55 +156,51 @@ ORDER BY
     start_col = column_index_from_string(start_col_letter)
     end_col = column_index_from_string(end_col_letter)
 
-    # 6. Detectar columna "Número"
-    numero_col_idx = None
-    for cell in sheet[start_row]:
-        if cell.value == "Número":
-            numero_col_idx = cell.column
+    # 7. Identificar columna "Número"
+    numero_col_index = None
+    for col in range(start_col, end_col + 1):
+        if sheet.cell(row=start_row, column=col).value == "Número":
+            numero_col_index = col
             break
 
-    if numero_col_idx is None:
-        print("No se encontró la columna 'Número'.")
+    if numero_col_index is None:
+        print("No se encontró la columna 'Número' en la tabla.")
         return
 
-    # 7. Obtener "Números" existentes
-    existing_numbers = {
-        sheet.cell(row=i, column=numero_col_idx).value
-        for i in range(start_row + 1, end_row + 1)
-        if sheet.cell(row=i, column=numero_col_idx).value is not None
+    # 8. Recoger valores existentes en "Número"
+    existing_numeros = {
+        sheet.cell(row=row, column=numero_col_index).value
+        for row in range(start_row + 1, end_row + 1)
     }
 
-    # 8. Insertar nuevas filas que no estén duplicadas
-    new_data = []
-    for row in resultados:
-        if row[1] not in existing_numbers:  # row[1] = "Número"
-            new_data.append(row)
-    
-    if not new_data:
+    # 9. Filtrar datos nuevos
+    nuevos_datos = [row for row in resultados if row[1] not in existing_numeros]
+
+    if not nuevos_datos:
         print("No hay datos nuevos que añadir.")
         return
-    
+
+    # 10. Insertar nuevas filas
     insert_row = end_row + 1
-    for row in new_data:
-        for col_index in range(len(row)):
-            cell = sheet.cell(row=insert_row, column=start_col + col_index, value=row[col_index])
-            # Copiar estilo de la última fila de la tabla
-            source_cell = sheet.cell(row=end_row, column=start_col + col_index)
-            cell.font = copy.copy(source_cell.font)
-            cell.fill = copy.copy(source_cell.fill)
-            cell.border = copy.copy(source_cell.border)
-            cell.alignment = copy.copy(source_cell.alignment)
+    for row in nuevos_datos:
+        for col_index, value in enumerate(row):
+            cell = sheet.cell(row=insert_row, column=start_col + col_index, value=value)
+            # Aplicar formato desde la última fila válida
+            ref_cell = sheet.cell(row=end_row, column=start_col + col_index)
+            cell.font = copy.copy(ref_cell.font)
+            cell.fill = copy.copy(ref_cell.fill)
+            cell.border = copy.copy(ref_cell.border)
+            cell.alignment = copy.copy(ref_cell.alignment)
         insert_row += 1
 
-    # 9. Actualizar rango de la tabla
-    new_end_row = end_row + len(new_data)
-    new_ref = f"{start_col_letter}{start_row}:{end_col_letter}{new_end_row}"
-    table.ref = new_ref
-    print(f"Tabla actualizada a rango: {new_ref}")
+    # 11. Actualizar la referencia de la tabla
+    new_end_row = end_row + len(nuevos_datos)
+    table.ref = f"{start_col_letter}{start_row}:{end_col_letter}{new_end_row}"
+    print(f"Tabla actualizada: {table.ref}")
 
-    # 10. Guardar archivo
+    # 12. Guardar
     book.save(file_path)
-    print(f"Archivo guardado en '{file_path}'.")
+    print(f"Archivo guardado correctamente en '{file_path}'.")
 
 if __name__ == '__main__':
     main()
