@@ -30,7 +30,8 @@ def main():
     fecha_fin = datetime.now().date()
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
     
-    query = f"""SELECT 
+    query = f"""
+    SELECT 
     rc.name as "Compañía",
     a.internal_number as "Número",
     rp.vat as "CIF",
@@ -136,7 +137,8 @@ WHERE
 	AND a.internal_number NOT LIKE 'RA%' -- Omitir RAPPEL
  
 ORDER BY 
-    a.internal_number;"""
+    a.internal_number;
+    """
     
     # 3. Ejecutar la consulta
     try:
@@ -178,7 +180,7 @@ ORDER BY
 
     # 6. Obtener códigos existentes para evitar duplicados (columna 3 = VAT/CIF)
     existing_invoice_codes = {
-        sheet.cell(row=i, column=3).value
+        sheet.cell(row=i, column=2).value
         for i in range(start_row + 1, end_row + 1)
         if sheet.cell(row=i, column=3).value is not None
     }
