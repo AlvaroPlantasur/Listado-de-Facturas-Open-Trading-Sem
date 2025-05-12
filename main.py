@@ -30,7 +30,7 @@ def main():
     fecha_fin = datetime.now().date()
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
     
-    query = f"""
+    query = f""" 
     SELECT 
     rc.name as "Compañía",
     a.internal_number as "Número",
@@ -178,17 +178,17 @@ ORDER BY
     start_col = column_index_from_string(start_col_letter)
     end_col = column_index_from_string(end_col_letter)
 
-    # 6. Obtener códigos existentes para evitar duplicados (columna 3 = VAT/CIF)
-    existing_invoice_codes = {
+    # 6. Obtener valores existentes de la columna 1 (Compañía)
+    existing_keys = {
         sheet.cell(row=i, column=1).value
         for i in range(start_row + 1, end_row + 1)
-        if sheet.cell(row=i, column=3).value is not None
+        if sheet.cell(row=i, column=1).value is not None
     }
 
-    # 7. Insertar filas justo debajo del final de la tabla
+    # 7. Insertar filas nuevas si no existen
     new_data = []
     for row in resultados:
-        if row[2] not in existing_invoice_codes:
+        if row[0] not in existing_keys:  # Columna 0 = columna 1 del Excel
             new_data.append(row)
     
     if not new_data:
