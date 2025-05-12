@@ -1,10 +1,11 @@
 import os
 import psycopg2
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font
 from openpyxl.worksheet.table import Table, TableStyleInfo
-from openpyxl.utils import get_column_letter, column_index_from_string
+from openpyxl.utils import get_column_letter
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 import sys
 import copy
 
@@ -30,7 +31,8 @@ def main():
     fecha_fin = datetime.now().date()
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
     
-    query = f""" 
+    # 3. Consulta SQL con el rango dinámico
+    query = f"""
     SELECT 
     rc.name as "Compañía",
     a.internal_number as "Número",
@@ -140,7 +142,7 @@ ORDER BY
     a.internal_number;
     """
     
-    # 3. Ejecutar la consulta
+    # 4. Ejecutar la consulta
     try:
         with psycopg2.connect(**db_params) as conn:
             with conn.cursor() as cur:
@@ -157,65 +159,44 @@ ORDER BY
     else:
         print(f"Se obtuvieron {len(resultados)} filas de la consulta.")
     
-    # 4. Cargar archivo y buscar tabla existente
+    # 5. Cargar el archivo base Portes.xlsx
     try:
         book = load_workbook(file_path)
         sheet = book.active
-        table = sheet.tables.get("Portes")
-        if not table:
-            print("No se encontró la tabla 'Portes'.")
-            return
+        existing_invoice_codes = {row[2] for row in sheet.iter_rows(min_row=2, values_only=True) if row[2] is not None}
     except FileNotFoundError:
-        print(f"No se encontró el archivo '{file_path}'.")
+        print(f"No se encontró el archivo base '{file_path}'. Se aborta para no perder el formato.")
         return
 
-    # 5. Determinar límites de la tabla existente
-    start_cell, end_cell = table.ref.split(':')
-    start_col_letter = ''.join(filter(str.isalpha, start_cell))
-    end_col_letter = ''.join(filter(str.isalpha, end_cell))
-    start_row = int(''.join(filter(str.isdigit, start_cell)))
-    end_row = int(''.join(filter(str.isdigit, end_cell)))
-    start_col = column_index_from_string(start_col_letter)
-    end_col = column_index_from_string(end_col_letter)
-
-    # 6. Obtener valores existentes de la columna 1 (Compañía)
-    existing_keys = {
-        sheet.cell(row=i, column=1).value
-        for i in range(start_row + 1, end_row + 1)
-        if sheet.cell(row=i, column=1).value is not None
-    }
-
-    # 7. Insertar filas nuevas si no existen
-    new_data = []
+    # 6. Añadir nuevas filas sin duplicados
     for row in resultados:
-        if row[0] not in existing_keys:  # Columna 0 = columna 1 del Excel
-            new_data.append(row)
+        if row[1] not in existing_invoice_codes:
+            sheet.append(row)
+            new_row_index = sheet.max_row
+            if new_row_index > 1:
+                for col in range(1, sheet.max_column + 1):
+                    source_cell = sheet.cell(row=new_row_index - 1, column=col)
+                    target_cell = sheet.cell(row=new_row_index, column=col)
+                    target_cell.font = copy.copy(source_cell.font)
+                    target_cell.fill = copy.copy(source_cell.fill)
+                    target_cell.border = copy.copy(source_cell.border)
+                    target_cell.alignment = copy.copy(source_cell.alignment)
     
-    if not new_data:
-        print("No hay datos nuevos que añadir.")
-        return
+    # 7. Actualizar referencia de la tabla "Portes"
+    if "Portes" in sheet.tables:
+        tabla = sheet.tables["Portes"]
+        max_row = sheet.max_row
+        max_col = sheet.max_column
+        last_col_letter = get_column_letter(max_col)
+        new_ref = f"A1:{last_col_letter}{max_row}"
+        tabla.ref = new_ref
+        print(f"Tabla 'Portes' actualizada a rango: {new_ref}")
+    else:
+        print("No se encontró la tabla 'Portes'. Se conservará el formato actual, pero no se actualizará la referencia de la tabla.")
     
-    insert_row = end_row + 1
-    for row in new_data:
-        for col_index in range(len(row)):
-            cell = sheet.cell(row=insert_row, column=start_col + col_index, value=row[col_index])
-            # Aplicar estilo desde la última fila válida
-            source_cell = sheet.cell(row=end_row, column=start_col + col_index)
-            cell.font = copy.copy(source_cell.font)
-            cell.fill = copy.copy(source_cell.fill)
-            cell.border = copy.copy(source_cell.border)
-            cell.alignment = copy.copy(source_cell.alignment)
-        insert_row += 1
-
-    # 8. Actualizar rango de la tabla
-    new_end_row = end_row + len(new_data)
-    new_ref = f"{start_col_letter}{start_row}:{end_col_letter}{new_end_row}"
-    table.ref = new_ref
-    print(f"Tabla 'Portes' actualizada a rango: {new_ref}")
-
-    # 9. Guardar archivo
+    # 8. Guardar archivo
     book.save(file_path)
-    print(f"Archivo guardado en '{file_path}'.")
-
+    print(f"Archivo guardado con la estructura de tabla en '{file_path}'.")
+    
 if __name__ == '__main__':
     main()
